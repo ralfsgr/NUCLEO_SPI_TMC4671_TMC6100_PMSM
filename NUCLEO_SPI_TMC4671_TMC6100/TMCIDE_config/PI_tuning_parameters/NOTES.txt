@@ -1,0 +1,20 @@
+Torque/Flux Tuning Tool (Open Loop)
+
+The Torque Flux/Tuning tool will automatically determine start values for the PI parameters
+by identifying the motor parameters. With this procedure,
+voltage steps are set and the current step response is evaluated.
+Only the flux current is stimulated for minimal/no motor movement in this tuning phase.
+It is recommended to use a PWM frequency of 25kHz for best identification results.
+
+Open the Torque/Flux Tuning Tool.
+
+Start the identification by using the Start button.
+
+first tuning is done on torque, so you need your motor connected to your system load for PI tuning;
+this is why you didn't get to tune your free hanging motor correctly;
+because you skipped this torque part and tried to back engineer the current control PID_TORQUE_I
+and PID_TORQUE_P, and thus they are not 100% correct and thus the other loops
+are not correct also - velocity control and position control, because they are derived from current control;
+
+because torque graph is only generated under load, otherwise the torque is in small values,
+and the TMCLIDE can't process that data correctly;

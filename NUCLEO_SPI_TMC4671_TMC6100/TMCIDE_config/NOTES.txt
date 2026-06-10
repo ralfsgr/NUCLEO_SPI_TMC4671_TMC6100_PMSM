@@ -1,0 +1,18 @@
+What you need to save to EEPROM
+
+From this code script, the only things that represent your permanent "calibration layout"
+(the ones you should save to memory so you don't have to run TMCL-IDE tuning again)
+are your permanent setup rules at the top:
+
+TMC4671_MOTOR_TYPE_N_POLE_PAIRS (0x0003000B $\rightarrow$ 11 Pole Pairs, Three-Phase PMSM)
+
+TMC4671_ABN_DECODER_MODE (0x0000100F $\rightarrow$ Configures your encoder direction and counting style)
+
+TMC4671_ABN_DECODER_PPR (0x00001000 $\rightarrow$ 4096 microsteps / 1024 PPR)
+
+TMC4671_ADC_I0_SCALE_OFFSET / TMC4671_ADC_I1_SCALE_OFFSET (Your current-sensing hardware calibration)
+
+Every time you boot your microcontroller in the future,
+just push those configuration values to the registers,
+run that exact Init encoder (mode 0) script sequence,
+and your motor will be perfectly calibrated and driving every single time.
