@@ -34,8 +34,71 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define TMC_CS_GPIO_Port GPIOC
-#define TMC_CS_Pin GPIO_PIN_9
+#define DRV_CS_GPIO_Port GPIOC
+#define DRV_CS_Pin GPIO_PIN_9
+
+#define CTR_CS_GPIO_Port GPIOC
+#define CTR_CS_Pin GPIO_PIN_8
+
+
+// SPI Read/Write Masks
+#define TMC4671_SPI_WRITE_MASK	0x80
+
+
+// // Motor type &  PWM configuration
+#define MOTOR_TYPE_N_POLE_PAIRS 0x1B
+#define PWM_POLARITIES 0x17
+#define PWM_MAXCNT 0x18
+#define PWM_BBM_H_BBM_L 0x19
+#define PWM_SV_CHOP 0x1A
+
+// ADC configuration
+#define ADC_I_SELECT 0x0A
+#define dsADC_MCFG_B_MCFG_A 0x04
+#define dsADC_MCLK_A 0x05
+#define dsADC_MCLK_B 0x06
+#define dsADC_MDEC_B_MDEC_A 0x07
+#define ADC_I0_SCALE_OFFSET 0x09
+#define ADC_I1_SCALE_OFFSET 0x08
+
+// ABN encoder settings
+#define ABN_DECODER_MODE 0x25
+#define ABN_DECODER_PPR 0x26
+#define ABN_DECODER_COUNT 0x27
+#define ABN_DECODER_PHI_E_PHI_M_OFFSET 0x29
+
+// Limits
+#define PID_TORQUE_FLUX_LIMITS 0x5E
+
+// PI settings
+#define PID_TORQUE_P_TORQUE_I 0x56
+#define PID_FLUX_P_FLUX_I 0x54
+
+
+// Init encoder (mode 0)
+#define MODE_RAMP_MODE_MOTION 0x63 // 1. Switches to Open Loop Mode
+#define ABN_DECODER_PHI_E_PHI_M_OFFSET 0x29
+#define PHI_E_SELECTION 0x52 // 2. Uses the internal Phi_E_Ext angle allocator
+#define PHI_E_EXT 0x1C // 3. Sets the electrical target angle to exactly 0°
+#define UQ_UD_EXT 0x24 // 4. Applies a strong voltage (Ud) to force lock the rotor
+// wait(1000); // 5. Waits 1 second for the motor to physically snap and settle
+#define ABN_DECODER_COUNT 0x27 // 6. Resets the encoder counter to 0 at this physical position
+
+
+// Feedback selection
+#define PHI_E_SELECTION 0x52 // Switches FOC commutation source to the ABN Encoder!
+#define VELOCITY_SELECTION 0x50
+
+#define PID_TORQUE_FLUX_TARGET 0x64
+
+
+// PI tuning
+#define PID_TORQUE_P_PID_TORQUE_I 0x56
+#define PID_FLUX_P_PID_FLUX_I 0x54
+#define PID_VELOCITY_P_VELOCITY_I 0x58
+#define PID_POSITION_P_POSITION_I 0x5a
+#define POSITION_SELECTION 0x51
+
 
 /* USER CODE END PD */
 
@@ -61,9 +124,6 @@ static void MX_SPI3_Init(void);
 
 
 
-
-
-
 void TMC6100_Write(uint8_t reg, uint32_t value)
 {
     uint8_t tx[5];
@@ -75,11 +135,29 @@ void TMC6100_Write(uint8_t reg, uint32_t value)
     tx[3] = (value >> 8)  & 0xFF;
     tx[4] = value & 0xFF;
 
-    HAL_GPIO_WritePin(TMC_CS_GPIO_Port, TMC_CS_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(DRV_CS_GPIO_Port, DRV_CS_Pin, GPIO_PIN_RESET);
     HAL_SPI_TransmitReceive(&hspi3, tx, rx, 5, 100);
-    HAL_GPIO_WritePin(TMC_CS_GPIO_Port, TMC_CS_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(DRV_CS_GPIO_Port, DRV_CS_Pin, GPIO_PIN_SET);
 
     printf("Wrote 0x%08lX to register 0x%02X\r\n", value, reg);
+}
+
+void TMC4671_Write(uint8_t reg1, uint32_t value1)
+{
+    uint8_t tx1[5];
+    uint8_t rx1[5] = {0};
+
+    tx1[0] = 0x80 | reg1;                    // Write command (MSB=1)
+    tx1[1] = (value1 >> 24) & 0xFF;
+    tx1[2] = (value1 >> 16) & 0xFF;
+    tx1[3] = (value1 >> 8)  & 0xFF;
+    tx1[4] = value1 & 0xFF;
+
+    HAL_GPIO_WritePin(CTR_CS_GPIO_Port, CTR_CS_Pin, GPIO_PIN_RESET);
+    HAL_SPI_TransmitReceive(&hspi3, tx1, rx1, 5, 100);
+    HAL_GPIO_WritePin(CTR_CS_GPIO_Port, CTR_CS_Pin, GPIO_PIN_SET);
+
+    printf("Wrote 0x%08lX to register 0x%02X\r\n", value1, reg1);
 }
 
 
@@ -94,15 +172,33 @@ uint32_t TMC6100_Read(uint8_t reg)
 
     tx[0] = reg;        // Read command (MSB=0)
 
-    HAL_GPIO_WritePin(TMC_CS_GPIO_Port, TMC_CS_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(DRV_CS_GPIO_Port, DRV_CS_Pin, GPIO_PIN_RESET);
     HAL_SPI_TransmitReceive(&hspi3, tx, rx, 5, 100);
-    HAL_GPIO_WritePin(TMC_CS_GPIO_Port, TMC_CS_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(DRV_CS_GPIO_Port, DRV_CS_Pin, GPIO_PIN_SET);
 
     uint32_t value = ((uint32_t)rx[1] << 24) | ((uint32_t)rx[2] << 16) |
                      ((uint32_t)rx[3] << 8)  | rx[4];
 
     printf("Read  reg 0x%02X = 0x%08lX\r\n", reg, value);
     return value;
+}
+
+uint32_t TMC4671_Read(uint8_t reg1)
+{
+    uint8_t tx1[5] = {0};
+    uint8_t rx1[5] = {0};
+
+    tx1[0] = reg1;        // Read command (MSB=0)
+
+    HAL_GPIO_WritePin(CTR_CS_GPIO_Port, CTR_CS_Pin, GPIO_PIN_RESET);
+    HAL_SPI_TransmitReceive(&hspi3, tx1, rx1, 5, 100);
+    HAL_GPIO_WritePin(CTR_CS_GPIO_Port, CTR_CS_Pin, GPIO_PIN_SET);
+
+    uint32_t value1 = ((uint32_t)rx1[1] << 24) | ((uint32_t)rx1[2] << 16) |
+                     ((uint32_t)rx1[3] << 8)  | rx1[4];
+
+    printf("Read  reg 0x%02X = 0x%08lX\r\n", reg1, value1);
+    return value1;
 }
 
 
@@ -203,6 +299,384 @@ void TMC6100_Init(void)
 }
 
 
+void TMC4671_Init(void)
+{
+	uint32_t feedback;
+	uint32_t expected_feedback;
+
+////////////////////////////  Motor type &  PWM configuration /////////////////////////////////////////
+    TMC4671_Write(MOTOR_TYPE_N_POLE_PAIRS, 0x0003000B);
+    expected_feedback = 0x0003000B;
+    // Read back to verify
+    feedback = TMC4671_Read(MOTOR_TYPE_N_POLE_PAIRS);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(PWM_POLARITIES, 0x00000000);
+    expected_feedback = 0x00000000;
+    // Read back to verify
+    feedback = TMC4671_Read(PWM_POLARITIES);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(PWM_MAXCNT, 0x00000F9F);
+    expected_feedback = 0x00000F9F;
+    // Read back to verify
+    feedback = TMC4671_Read(PWM_MAXCNT);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(PWM_BBM_H_BBM_L, 0x00002828);
+    expected_feedback = 0x00002828;
+    // Read back to verify
+    feedback = TMC4671_Read(PWM_BBM_H_BBM_L);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(PWM_SV_CHOP, 0x00000007);
+    expected_feedback = 0x00000007;
+    // Read back to verify
+    feedback = TMC4671_Read(PWM_SV_CHOP);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    ////////////////////////////  Motor type &  PWM configuration /////////////////////////////////////////
+
+
+    ////////////////////////////  ADC configuration /////////////////////////////////////////
+
+
+    TMC4671_Write(ADC_I_SELECT, 0x18000100);
+    expected_feedback = 0x18000100;
+    // Read back to verify
+    feedback = TMC4671_Read(ADC_I_SELECT);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(dsADC_MCFG_B_MCFG_A, 0x00100010);
+    expected_feedback = 0x00100010;
+    // Read back to verify
+    feedback = TMC4671_Read(dsADC_MCFG_B_MCFG_A);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(dsADC_MCLK_A, 0x20000000);
+    expected_feedback = 0x20000000;
+    // Read back to verify
+    feedback = TMC4671_Read(dsADC_MCLK_A);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(dsADC_MCLK_B, 0x20000000);
+    expected_feedback = 0x20000000;
+    // Read back to verify
+    feedback = TMC4671_Read(dsADC_MCLK_B);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(dsADC_MDEC_B_MDEC_A, 0x014E014E);
+    expected_feedback = 0x014E014E;
+    // Read back to verify
+    feedback = TMC4671_Read(dsADC_MDEC_B_MDEC_A);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(ADC_I0_SCALE_OFFSET, 0x010081D5);
+    expected_feedback = 0x010081D5;
+    // Read back to verify
+    feedback = TMC4671_Read(ADC_I0_SCALE_OFFSET);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(ADC_I1_SCALE_OFFSET, 0x01008133);
+    expected_feedback = 0x01008133;
+    // Read back to verify
+    feedback = TMC4671_Read(ADC_I1_SCALE_OFFSET);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    ////////////////////////////  ADC configuration /////////////////////////////////////////
+
+    ////////////////////////////  ABN encoder settings /////////////////////////////////////////
+
+    TMC4671_Write(ABN_DECODER_MODE, 0x0000100F);
+    expected_feedback = 0x0000100F;
+    // Read back to verify
+    feedback = TMC4671_Read(ABN_DECODER_MODE);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(ABN_DECODER_PPR, 0x00001000);
+    expected_feedback = 0x00001000;
+    // Read back to verify
+    feedback = TMC4671_Read(ABN_DECODER_PPR);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(ABN_DECODER_COUNT, 0x00000025);
+    expected_feedback = 0x00000025;
+    // Read back to verify
+    feedback = TMC4671_Read(ABN_DECODER_COUNT);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(ABN_DECODER_PHI_E_PHI_M_OFFSET, 0x00000000);
+    expected_feedback = 0x00000000;
+    // Read back to verify
+    feedback = TMC4671_Read(ABN_DECODER_PHI_E_PHI_M_OFFSET);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    ////////////////////////////  ABN encoder settings /////////////////////////////////////////
+
+    ////////////////////////////  Limits /////////////////////////////////////////
+
+    TMC4671_Write(PID_TORQUE_FLUX_LIMITS, 0x000003E8);
+    expected_feedback = 0x000003E8;
+    // Read back to verify
+    feedback = TMC4671_Read(PID_TORQUE_FLUX_LIMITS);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    ////////////////////////////  Limits /////////////////////////////////////////
+
+    ////////////////////////////  PI settings /////////////////////////////////////////
+
+    TMC4671_Write(PID_TORQUE_P_TORQUE_I, 0x01000100);
+    expected_feedback = 0x01000100;
+    // Read back to verify
+    feedback = TMC4671_Read(PID_TORQUE_P_TORQUE_I);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(PID_FLUX_P_FLUX_I, 0x01000100);
+    expected_feedback = 0x01000100;
+    // Read back to verify
+    feedback = TMC4671_Read(PID_FLUX_P_FLUX_I);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    ////////////////////////////  PI settings /////////////////////////////////////////
+
+    ////////////////////////////  ===== ABN encoder test drive ===== /////////////////////////////////////////
+
+    // Init encoder (mode 0)
+    TMC4671_Write(MODE_RAMP_MODE_MOTION, 0x00000008); // 1. Switches to Open Loop Mode
+    expected_feedback = 0x00000008;
+    // Read back to verify
+    feedback = TMC4671_Read(MODE_RAMP_MODE_MOTION);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(ABN_DECODER_PHI_E_PHI_M_OFFSET, 0x00000000);
+    expected_feedback = 0x00000000;
+    // Read back to verify
+    feedback = TMC4671_Read(ABN_DECODER_PHI_E_PHI_M_OFFSET);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(PHI_E_SELECTION, 0x00000001); // 2. Uses the internal Phi_E_Ext angle allocator
+    expected_feedback = 0x00000001;
+    // Read back to verify
+    feedback = TMC4671_Read(PHI_E_SELECTION);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(PHI_E_EXT, 0x00000000); // 3. Sets the electrical target angle to exactly 0°
+    expected_feedback = 0x00000000;
+    // Read back to verify
+    feedback = TMC4671_Read(PHI_E_EXT);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(UQ_UD_EXT, 0x00000FA0); // 4. Applies a strong voltage (Ud) to force lock the rotor
+    expected_feedback = 0x00000FA0;
+    // Read back to verify
+    feedback = TMC4671_Read(UQ_UD_EXT);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    HAL_Delay(1000); // 5. Waits 1 second for the motor to physically snap and settle
+
+    TMC4671_Write(ABN_DECODER_COUNT, 0x00000000); // 6. Resets the encoder counter to 0 at this physical position
+    expected_feedback = 0x00000000;
+    // Read back to verify
+    feedback = TMC4671_Read(ABN_DECODER_COUNT);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    ////////////////////////////  ===== ABN encoder test drive ===== /////////////////////////////////////////
+
+    //////////////////////////// Feedback selection /////////////////////////////////////////
+
+    TMC4671_Write(PHI_E_SELECTION, 0x00000003); // Switches FOC commutation source to the ABN Encoder!
+    expected_feedback = 0x00000003;
+    // Read back to verify
+    feedback = TMC4671_Read(PHI_E_SELECTION);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    TMC4671_Write(VELOCITY_SELECTION, 0x00000009);
+    expected_feedback = 0x00000009;
+    // Read back to verify
+    feedback = TMC4671_Read(VELOCITY_SELECTION);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    //////////////////////////// Feedback selection /////////////////////////////////////////
+
+    //////////////////////////// Switch to torque mode /////////////////////////////////////////
+
+    TMC4671_Write(MODE_RAMP_MODE_MOTION, 0x00000001);
+    expected_feedback = 0x00000001;
+    // Read back to verify
+    feedback = TMC4671_Read(MODE_RAMP_MODE_MOTION);
+    if (feedback == expected_feedback) {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: SUCCESS (0x%08lX)\r\n", feedback);
+    } else {
+        printf("MOTOR_TYPE_N_POLE_PAIRS verification: FAILED! Expected 0x%08lX, got 0x%08lX\r\n", expected_feedback, feedback);
+    }
+
+    //////////////////////////// Switch to torque mode /////////////////////////////////////////
+}
+
+void TMC4671_test(void)
+{
+
+    TMC4671_Write(MODE_RAMP_MODE_MOTION, 0x00000001); // Switches the chip into Torque Mode
+    TMC4671_Write(PID_TORQUE_FLUX_TARGET, 0x03E80000); // Rotate right
+    HAL_Delay(3000);
+    TMC4671_Write(PID_TORQUE_FLUX_TARGET, 0xFC180000); // Rotate left
+    HAL_Delay(3000);
+    TMC4671_Write(PID_TORQUE_FLUX_TARGET, 0x00000000); // Stop
+
+}
+
+
+void TMC4671_PI_tuning(void)
+{
+    uint16_t p_gain = 256;
+    uint16_t i_gain = 256;
+
+    // CURRENT CONTROL
+    // Combine them: Shift P to the upper 16 bits, and clear/place I in the lower 16 bits
+    uint32_t reg_value = ((uint32_t)p_gain << 16) | (i_gain & 0xFFFF);
+    TMC4671_Write(PID_TORQUE_P_PID_TORQUE_I, reg_value);
+    // Combine them: Shift P to the upper 16 bits, and clear/place I in the lower 16 bits
+    reg_value = ((uint32_t)p_gain << 16) | (i_gain & 0xFFFF); // same values in torque and flux registers as per tuning
+    TMC4671_Write(PID_FLUX_P_PID_FLUX_I, reg_value);
+
+    // VELOCITY CONTROL
+    uint16_t p_velocity = 600;
+    uint16_t i_velocity = 12;
+    // Combine them: Shift P to the upper 16 bits, and clear/place I in the lower 16 bits
+    reg_value = ((uint32_t)p_velocity << 16) | (i_velocity & 0xFFFF); // same values in torque and flux registers as per tuning
+    TMC4671_Write(PID_VELOCITY_P_VELOCITY_I, reg_value);
+
+    // POSITION CONTROL
+    TMC4671_Write(POSITION_SELECTION, 0x00000009); //phi_m_abn
+    uint16_t p_pos = 15;
+    uint16_t i_pos = 0;
+    // Combine them: Shift P to the upper 16 bits, and clear/place I in the lower 16 bits
+    reg_value = ((uint32_t)p_pos << 16) | (i_pos & 0xFFFF); // same values in torque and flux registers as per tuning
+    TMC4671_Write(PID_POSITION_P_POSITION_I, reg_value);
+}
+
+
+void TMC4671_test_after_PI_tuning(void)
+{
+
+    TMC4671_Write(MODE_RAMP_MODE_MOTION, 0x00000001); // Switches the chip into Torque Mode
+    TMC4671_Write(PID_TORQUE_FLUX_TARGET, 0x03E80000); // Rotate right
+    HAL_Delay(3000);
+    TMC4671_Write(PID_TORQUE_FLUX_TARGET, 0xFC180000); // Rotate left
+    HAL_Delay(3000);
+    TMC4671_Write(PID_TORQUE_FLUX_TARGET, 0x00000000); // Stop
+
+}
+
+
 
 /* USER CODE END PFP */
 
@@ -249,6 +723,18 @@ int main(void)
   printf("TMC6100 Test Start\r\n");
   TMC6100_Init();
 
+  TMC4671_Init();
+
+  TMC4671_test();
+
+  HAL_Delay(7000);
+
+  TMC4671_PI_tuning();
+
+  HAL_Delay(7000);
+
+  TMC4671_test_after_PI_tuning();
+
 
   /* USER CODE END 2 */
 
@@ -260,6 +746,8 @@ int main(void)
       // Optional: periodic status check
       //HAL_Delay(1000);
       //TMC6100_Read(0x01);  // Check GSTAT
+
+	  //HAL_Delay(2000);
 
     /* USER CODE END WHILE */
 
