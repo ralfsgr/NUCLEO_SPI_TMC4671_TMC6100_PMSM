@@ -99,6 +99,12 @@
 #define PID_POSITION_P_POSITION_I 0x5a
 #define POSITION_SELECTION 0x51
 
+// velocity target selection in velocity mode
+#define PID_VELOCITY_TARGET 0x66
+
+// position mode target selection
+#define PID_POSITION_TARGET 0x68
+#define PID_POSITION_ACTUAL 0x6B
 
 /* USER CODE END PD */
 
@@ -677,6 +683,40 @@ void TMC4671_test_after_PI_tuning(void)
 }
 
 
+void TMC4671_velocity_mode_test(void)
+{
+    TMC4671_Write(MODE_RAMP_MODE_MOTION, 0x00000002); // Switches the chip into velocity mode
+    TMC4671_Write(PID_VELOCITY_TARGET, 1000); // Rotate right // you can write simple in decimal values because all register is for this one unlike the torque flux register which is split for multiple entries;
+    HAL_Delay(3000);
+    TMC4671_Write(PID_VELOCITY_TARGET, -1000); // Rotate left
+    HAL_Delay(3000);
+    TMC4671_Write(PID_VELOCITY_TARGET, 0); // Stop
+
+}
+
+
+void TMC4671_position_mode_test(void)
+{
+	TMC4671_Write(PID_POSITION_ACTUAL, 0);
+	TMC4671_Write(PID_POSITION_TARGET, 0);
+	HAL_Delay(10);
+    TMC4671_Write(MODE_RAMP_MODE_MOTION, 0x00000003); // Switches the chip into position mode
+    TMC4671_Write(PID_POSITION_TARGET, 65535); // Rotate right // you can write simple in decimal values because all register is for this one unlike the torque flux register which is split for multiple entries;
+    HAL_Delay(3000);
+    TMC4671_Write(PID_POSITION_TARGET, 0); // return back to zero
+    HAL_Delay(3000);
+    TMC4671_Write(PID_POSITION_TARGET, -65535); // Rotate left
+    HAL_Delay(3000);
+    TMC4671_Write(PID_POSITION_TARGET, 0); // return back to zero
+    HAL_Delay(3000);
+
+    // In position mode, the motor does not spin at one fixed speed. Instead, the speed is determined by how far away the motor is from its target and how you have configured the limits of the controller.
+    // There are two main things that dictate the speed in position mode: the Position PI Loop and the Ramp Generator.
+    // Under this default setup, the maximum speed the motor hits during the transition depends entirely on your Position P Gain (PID_POSITION_P,
+    // register 0x4C)and your Velocity Limit (PID_VELOCITY_LIMIT, register 0x4A). The motor will accelerate as hard as it can until it either hits your velocity limit or starts slowing down for the target.
+}
+
+
 
 /* USER CODE END PFP */
 
@@ -725,15 +765,27 @@ int main(void)
 
   TMC4671_Init();
 
-  TMC4671_test();
+  //TMC4671_test();
 
-  HAL_Delay(7000);
+  //HAL_Delay(7000);
 
   TMC4671_PI_tuning();
 
-  HAL_Delay(7000);
+  //HAL_Delay(7000);
 
-  TMC4671_test_after_PI_tuning();
+  //TMC4671_test_after_PI_tuning();
+
+  //HAL_Delay(7000);
+
+  //TMC4671_velocity_mode_test();
+
+  //HAL_Delay(7000);
+
+  TMC4671_position_mode_test();
+
+  //HAL_Delay(7000);
+
+  //TMC4671_test_after_PI_tuning();
 
 
   /* USER CODE END 2 */

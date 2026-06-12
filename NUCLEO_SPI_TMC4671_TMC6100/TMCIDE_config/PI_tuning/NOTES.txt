@@ -18,3 +18,16 @@ are not correct also - velocity control and position control, because they are d
 
 because torque graph is only generated under load, otherwise the torque is in small values,
 and the TMCLIDE can't process that data correctly;
+
+
+
+
+
+
+
+
+
+With the mechanical angle phi_m selected as source for velocity measurement,
+one gets the mechanical velocity taking the set number of pole pairs (N_POLE_PAIRS)
+of the motor into account. Nevertheless, for a highly precise positioning,
+it might be useful to do positioning based on the electrical angel phi_e.
